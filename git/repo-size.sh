@@ -1,5 +1,10 @@
 #!/bin/bash
 
+# Script used to List Large Files of git repo. Will automatically remove all files ignored by .gitignore from the repo history.
+# Work In Progress
+# @author Phoenix Osiris
+# @license mit
+
 function renderHelp() {
 	echo "Repo Size Claim Script"
 	echo " "
@@ -117,7 +122,7 @@ pushd "${sPath}" > /dev/null
 			SHA=$(echo "$sObject" | cut -f 1 -d\ )
 			
 			sIndex=$(grep $SHA $sIndexFile);
-			if [ -z sIndex ]; then
+			if [ -z "$sIndex" ]; then
 				continue
 			fi
 			
@@ -125,7 +130,7 @@ pushd "${sPath}" > /dev/null
 			sFile=$(echo "$sIndex" | awk '{print $2}');
 
 			if [ $iMaxSize == 0 -o $iSize -gt $iMaxSize ]; then
-				sFiles="$sFiles\n$sFile"
+				sFiles="$sFiles"$'\n'"$sFile"
 			fi
 		
 			let iCount+=1
@@ -158,6 +163,8 @@ pushd "${sPath}" > /dev/null
 		sBlank=$(head -c $iCols < /dev/zero | tr '\0' ' ')
 		showMessage "\rProcessing...Done! $sBlank"
 		
+		rm $sIndexFile
+		
 		if [ $vSave != false ]; then
 			showMessage "Saving Files List..." true
 			echo "$sFiles" > $vSave
@@ -168,7 +175,8 @@ pushd "${sPath}" > /dev/null
 	fi
 	
 	if [ $bIgnored ]; then
-		#sIndexed=$(git ls-files);
+		git ls-files > $sIndexFile
+		
 		iTotal=$(echo "$sIndexed" | wc -l | awk '{gsub(/^ +| +$/,"")} {print $0}')
 		let iCols=$(tput cols)-29;
 			#Comparing To Index...[]     %#
@@ -179,10 +187,9 @@ pushd "${sPath}" > /dev/null
 		IFS=$'\n'
 		for sFile in $sFiles; do
 			bIncluded=false
-
-			sFound=$(echo "$sIndexed" | grep -m1 $sFile)
-			if [ -z "$sFound" ]; then
-				sRemove="$sRemove\n$sFile"
+			sFound=$(grep -m1 $sFile $sIndexFile)
+			if [ -n "$sFound" ]; then
+				sRemove="$sRemove"$'\n'"$sFile"
 			fi
 			
 			let iCount+=1
@@ -208,52 +215,37 @@ pushd "${sPath}" > /dev/null
 			#showMessage "Comparing To Index...[$sEqual$sBlank] $iPercent %" true
 			
 			let iRemaining=$iTotal-$iCount
-			showMessage "Comparing To Index...$iRemaining Remaining..."
+			showMessage "Comparing To Index...$iRemaining Remaining..." true
 		done;
 		IFS=$vIFS
 		let iCols=$iCols+9
 		sBlank=$(head -c $iCols < /dev/zero | tr '\0' ' ')
 		showMessage "Comparing To Index...Done!$sBlank"
 		
-		if [ -n sRemove ]; then
-			iTotal=$(echo "$sIndexed" | wc -l | awk '{gsub(/^ +| +$/,"")} {print $0}')
+		rm $sIndexFile
+		
+		if [ -n "$sRemove" ]; then
+			iTotal=$(echo "$sRemove" | wc -l | awk '{gsub(/^ +| +$/,"")} {print $0}')
 			let iCols=$(tput cols)-46;
 				#"Removing Ignored Files From History...[]     "
 			iCount=0
-
+			IFS=$'\n'
 			for sFile in $sRemove; do
 				let iCount+=1
+				let iRemaining=$iTotal-$iCount
 			
-			
-				iPercent=$(awk -v c=$iCount -v t=$iTotal 'BEGIN { print c / t }')
-				iColumns=$(awk -v c=$iCols -v p=$iPercent 'BEGIN { print int(c * p) }')
-				iPercent=$(awk -v p=$iPercent 'BEGIN { print int(p * 100) }')
-				iBlankCols=$(awk -v c=$iCols -v f=$iColumns 'BEGIN { print c - f + 1 }' )
-		
-
-				if [ $iColumns == "0" ]; then
-					sEqual=""
-				else
-					sEqual=$(head -c $iColumns < /dev/zero | tr '\0' '=')
-				fi
-				if [ $iBlankCols == "0" ]; then
-					sBlank=""
-				else
-					sBlank=$(head -c $iBlankCols < /dev/zero | tr '\0' ' ')
-				fi
-			
-				showMessage "Removing Ignored Files From History...[$sEquals$sBlank] $iPercent %" true
-				
-				git filter-branch --force --index-filter "git rm --cached --ignore-unmatch $sFile" --prune-empty --tag-name-filter cat -- --all #> /dev/null 2>&1
-				rm -rf .git/refs/original/ #> /dev/null 2>&1
-				git reflog expire --expire=now --all #> /dev/null 2>&1
+				showMessage "Removing Ignored Files From History...$iRemaining Remaining..." true
+				git filter-branch --force --index-filter "git rm --cached --ignore-unmatch $sFile" --prune-empty --tag-name-filter cat -- --all > /dev/null 2>&1
+				rm -rf .git/refs/original/ > /dev/null 2>&1
+				git reflog expire --expire=now --all > /dev/null 2>&1
 			done;
+			IFS=$vIFS
 			let iCols=$iCols+3
 			sBlank=$(head -c $iCols < /dev/zero | tr '\0' ' ')
 			showMessage "Removing Ignored Files From History...Done!$sBlank"
 			showMessage "Cleaning Up..." true
-				git gc --prune=now #> /dev/null 2>&1
-				git gc --aggressive --prune=now #> /dev/null 2>&1
+				git gc --prune=now > /dev/null 2>&1
+				git gc --aggressive --prune=now > /dev/null 2>&1
 			showMessage "Cleaning Up...Done!"
 		fi
 	fi
