@@ -177,14 +177,18 @@ pushd "${sPath}" > /dev/null
 	if [ $bIgnored ]; then
 		git ls-files > $sIndexFile
 		
-		iTotal=$(echo "$sIndexed" | wc -l | awk '{gsub(/^ +| +$/,"")} {print $0}')
-		let iCols=$(tput cols)-29;
+		#iTotal=$(cat $sFiles | wc -l | awk '{gsub(/^ +| +$/,"")} {print $0}')
+		#let iCols=$(tput cols)-29;
 			#Comparing To Index...[]     %#
 		
 		#Defaults
 		iCount=0
+		iTotal=0
 		sRemove=""
 		IFS=$'\n'
+		for sFile in $sFiles; do
+			let iTotal+=1
+		done;
 		for sFile in $sFiles; do
 			bIncluded=false
 			sFound=$(grep -m1 $sFile $sIndexFile)
@@ -229,16 +233,19 @@ pushd "${sPath}" > /dev/null
 			let iCols=$(tput cols)-46;
 				#"Removing Ignored Files From History...[]     "
 			iCount=0
+			sRemoving=""
 			IFS=$'\n'
 			for sFile in $sRemove; do
 				let iCount+=1
+				
 				let iRemaining=$iTotal-$iCount
 			
 				showMessage "Removing Ignored Files From History...$iRemaining Remaining..." true
-				git filter-branch --force --index-filter "git rm --cached --ignore-unmatch $sFile" --prune-empty --tag-name-filter cat -- --all > /dev/null 2>&1
-				rm -rf .git/refs/original/ > /dev/null 2>&1
-				git reflog expire --expire=now --all > /dev/null 2>&1
+				git filter-branch --force --index-filter "git rm --cached --ignore-unmatch $sRemoving" --prune-empty --tag-name-filter cat -- --all #> /dev/null 2>&1
+				rm -rf .git/refs/original/ #> /dev/null 2>&1
+				git reflog expire --expire=now --all #> /dev/null 2>&1
 			done;
+			
 			IFS=$vIFS
 			let iCols=$iCols+3
 			sBlank=$(head -c $iCols < /dev/zero | tr '\0' ' ')
