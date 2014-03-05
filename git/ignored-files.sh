@@ -21,7 +21,11 @@ function showMessage() {
 		if [ $2 ]; then
 			echo -ne "$1\r"
 		else
-			echo -e "$1"
+			let iCols=$(tput cols)
+			let iLength=${#1}
+			let iCols-=$iLength
+			sBlank=$(head -c $iCols < /dev/zero | tr '\0' ' ')
+			echo -e "$1$sBlank"
 		fi
 	fi
 }
@@ -29,19 +33,22 @@ function showMessage() {
 #Set Defaults
 sPath=$(pwd);
 bIgnored=false;
+bBackup=true;
+sExportFile="./../tmp.Files.log"
 vIFS=$IFS;
-sIndexFile="tmp.Index.log"
+sIndexFile="./../tmp.Index.log"
 sFile=""
 sFiles=""
 
 #Build Options
-while getopts hcd:f:iq option
+while getopts bcd:e:f:hiq option
 do
 	case "${option}"
 	in
 		b) bBackup=false;;
 		c) bClean=false;;
 		d) sPath=${OPTARG};;
+		e) sExportFile=${OPTARG};;
 		f) sFile=${OPTARG};;
 		h) 
 			renderHelp
@@ -52,8 +59,9 @@ do
 done
 
 if [ -z $sFile ]; then
-	while read data; do
-		$sFiles=""
+	while read -t 0 $sData; do
+		sFiles="$sFiles"$'\n'"$sData"
+		echo "here"
 	done
 fi
 
@@ -94,73 +102,88 @@ pushd "${sPath}" > /dev/null
 	IFS=$'\n'
 	
 	if [ -z $sFiles ]; then
-		if [ -n $sFile ]; then
-			sFiles=$(cat $sFile);	
+		if [ -n "$sFile" ]; then
+			if ! [ -f $sFile ]; then
+				echo "ERROR: File List File Does Not Exist"
+				echo " "
+				renderHelp
+				exit 4;
+			fi
+			
+			showMessage "Loading File List from $sFile..." true
+			sFiles=$(cat $sFile);
+			showMessage "Loading File List...Done!"
 		else
-			for sFile in $(find . -type f); do
-				sFiles="$sFiles"$'\n'"$sFile"
-			done
+			showMessage "Building File List..." true
+			find . -type f > $sExportFile;
+			sFiles=$(cat $sExportFile);
+			showMessage "Building File List...Done!"
+			
+			if [ $sExportFile == "./../tmp.Files.log" ]; then
+				rm $sExportFile
+			fi
 		fi
 	fi
 	
 	# Generate Count (Too Many To Pipe)
-	for sFile in $sFiles; do
-		let iTotal+=1
-	done;
+	if [ $iTotal == 0 ]; then
+		for sFile in $sFiles; do
+			let iTotal+=1
+			showMessage "Counting Files...$iTotal" true
+		done;
+		showMessage "Counting Files...Done!"
+	fi
 	
 	# Loop Through Files
 	for sFile in $sFiles; do
 		bIncluded=false
-		sFound=$(grep -m1 $sFile $sIndexFile)
-		if [ -n "$sFound" ]; then
-			sRemove="$sRemove"$'\n'"$sFile"
+		sFound=$(grep -m1 "${sFile:2}" $sIndexFile)
+		if [ -z "$sFound" ]; then
+			sRemove="$sRemove"$'\n'"${sFile:2}"
 		fi
-			
 			
 		let iCount+=1
 		let iRemaining=$iTotal-$iCount
 		showMessage "Comparing To Index...$iRemaining Remaining..." true
 	done;
 	
+	showMessage "Comparing To Index...Done!"
+	
 	# Reseting Argument Spearator
 	IFS=$vIFS
-	
-	let iCols=$iCols+9
-	sBlank=$(head -c $iCols < /dev/zero | tr '\0' ' ')
-	showMessage "Comparing To Index...Done!$sBlank"
 		
-	if [ -n "$sRemove" ]; then
-			iTotal=$(echo "$sRemove" | wc -l | awk '{gsub(/^ +| +$/,"")} {print $0}')
-			let iCols=$(tput cols)-46;
-				#"Removing Ignored Files From History...[]     "
-			iCount=0
-			sRemoving=""
-			IFS=$'\n'
-			for sFile in $sRemove; do
-				let iCount+=1
-				
-				let iRemaining=$iTotal-$iCount
+	if [ $bIgnored == true ]; then
+		iTotal=0
+		for sFile in $sRemove; do
+			let iTotal+=1
+			showMessage "Counting Files to Remove...$iTotal"
+		done;
+		showMessage "Counting Files to Remove...Done!"
+		iCount=0
+		IFS=$'\n'
+		for sFile in $sRemove; do
+			let iCount+=1
 			
-				showMessage "Removing Ignored Files From History...$iRemaining Remaining..." true
-				git filter-branch --force --index-filter "git rm --cached --ignore-unmatch $sRemoving" --prune-empty --tag-name-filter cat -- --all | {
-					while read sLine; do
-						if [ $sLine =~ "\(([A-Z]+)\/([A-Z]+)\)" ]; then
-								
-						fi
-					done
-				}
+			let iRemaining=$iTotal-$iCount
+		
+			showMessage "Removing Ignored Files From History...$iRemaining Remaining..." true
+			git filter-branch --force --index-filter "git rm --cached --ignore-unmatch $sFile" --prune-empty --tag-name-filter cat -- --all | {
+				while read sLine; do
+					showMessage "Removing Ignored Files From History...$iRemaining...: $sLine" true
+				done
+			}
 				
-				rm -rf .git/refs/original/ #> /dev/null 2>&1
-				git reflog expire --expire=now --all #> /dev/null 2>&1
-			done;
+			rm -rf .git/refs/original/ #> /dev/null 2>&1
+			git reflog expire --expire=now --all #> /dev/null 2>&1
+		done;
 			
-			IFS=$vIFS
-			let iCols=$iCols+3
-			sBlank=$(head -c $iCols < /dev/zero | tr '\0' ' ')
-			showMessage "Removing Ignored Files From History...Done!$sBlank"
-			showMessage "Cleaning Up..." true
-				git gc --prune=now > /dev/null 2>&1
-				git gc --aggressive --prune=now > /dev/null 2>&1
-			showMessage "Cleaning Up...Done!"
-		fi
+		IFS=$vIFS
+		showMessage "Removing Ignored Files From History...Done!"
+		showMessage "Cleaning Up..." true
+		git gc --prune=now > /dev/null 2>&1	
+		git gc --aggressive --prune=now > /dev/null 2>&1
+		showMessage "Cleaning Up...Done!"
+	else
+		echo $sRemove
 	fi
+popd
