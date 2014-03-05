@@ -241,7 +241,14 @@ pushd "${sPath}" > /dev/null
 				let iRemaining=$iTotal-$iCount
 			
 				showMessage "Removing Ignored Files From History...$iRemaining Remaining..." true
-				git filter-branch --force --index-filter "git rm --cached --ignore-unmatch $sRemoving" --prune-empty --tag-name-filter cat -- --all #> /dev/null 2>&1
+				git filter-branch --force --index-filter "git rm --cached --ignore-unmatch $sRemoving" --prune-empty --tag-name-filter cat -- --all | {
+					while read sLine; do
+						if [ $sLine =~ "\(([A-Z]+)\/([A-Z]+)\)" ]; then
+								
+						fi
+					done
+				}
+				
 				rm -rf .git/refs/original/ #> /dev/null 2>&1
 				git reflog expire --expire=now --all #> /dev/null 2>&1
 			done;
