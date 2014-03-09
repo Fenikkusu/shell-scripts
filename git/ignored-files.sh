@@ -37,6 +37,7 @@ bBackup=true;
 sExportFile="./../tmp.Files.log"
 vIFS=$IFS;
 sIndexFile="./../tmp.Index.log"
+sRemoveFile="./../tmp.Remove.log"
 sFile=""
 sFiles=""
 
@@ -61,7 +62,6 @@ done
 if [ -z $sFile ]; then
 	while read -t 0 $sData; do
 		sFiles="$sFiles"$'\n'"$sData"
-		echo "here"
 	done
 fi
 
@@ -136,10 +136,14 @@ pushd "${sPath}" > /dev/null
 	
 	# Loop Through Files
 	for sFile in $sFiles; do
+		if [ ${sFile:2:4} == ".git" ]; then
+			continue;
+		fi
+		
 		bIncluded=false
 		sFound=$(grep -m1 "${sFile:2}" $sIndexFile)
 		if [ -z "$sFound" ]; then
-			sRemove="$sRemove"$'\n'"${sFile:2}"
+			echo $'\n'"${sFile:2}" >> $sRemoveFile
 		fi
 			
 		let iCount+=1
@@ -149,32 +153,38 @@ pushd "${sPath}" > /dev/null
 	
 	showMessage "Comparing To Index...Done!"
 	
-	# Reseting Argument Spearator
-	IFS=$vIFS
+	if [ $sIndexFile == "./../tmp.Index.log" ]; then
+		rm $sIndexFile;
+	fi
+	
+	sRemove=$(cat $sRemoveFile)
+	rm $sRemoveFile
 		
 	if [ $bIgnored == true ]; then
 		iTotal=0
 		for sFile in $sRemove; do
 			let iTotal+=1
-			showMessage "Counting Files to Remove...$iTotal"
+			showMessage "Counting Files to Remove...$iTotal" true
 		done;
+
 		showMessage "Counting Files to Remove...Done!"
 		iCount=0
-		IFS=$'\n'
+
 		for sFile in $sRemove; do
 			let iCount+=1
 			
 			let iRemaining=$iTotal-$iCount
 		
-			showMessage "Removing Ignored Files From History...$iRemaining Remaining..." true
-			git filter-branch --force --index-filter "git rm --cached --ignore-unmatch $sFile" --prune-empty --tag-name-filter cat -- --all | {
-				while read sLine; do
-					showMessage "Removing Ignored Files From History...$iRemaining...: $sLine" true
-				done
-			}
-				
-			rm -rf .git/refs/original/ #> /dev/null 2>&1
-			git reflog expire --expire=now --all #> /dev/null 2>&1
+			showMessage "Removing Ignored Files From History...$iRemaining Remaining..."
+			if [ $bQuiet ]; then
+				git filter-branch --force --index-filter "git rm --cached --ignore-unmatch $sFile" --prune-empty --tag-name-filter cat -- --all > /dev/null 2>&1
+				rm -rf .git/refs/original/ > /dev/null 2>&1
+				git reflog expire --expire=now --all > /dev/null 2>&1
+			else
+				git filter-branch --force --index-filter "git rm --cached --ignore-unmatch $sFile" --prune-empty --tag-name-filter cat -- --all
+				rm -rf .git/refs/original/ #> /dev/null 2>&1
+				git reflog expire --expire=now --all #> /dev/null 2>&1
+			fi
 		done;
 			
 		IFS=$vIFS
