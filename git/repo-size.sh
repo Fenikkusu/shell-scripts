@@ -25,7 +25,11 @@ function showMessage() {
 		if [ $2 ]; then
 			echo -ne "$1\r"
 		else
-			echo -e "$1"
+			let iCols=$(tput cols)
+			let iLength=${#1}
+			let iCols-=$iLength
+			sBlank=$(head -c $iCols < /dev/zero | tr '\0' ' ')
+			echo -e "$1$sBlank"
 		fi
 	fi
 }
@@ -36,16 +40,14 @@ bClean=true;
 bQuiet=false;
 iMaxSize=0;
 bIgnored=true;
-vLoad=false;
-vSave=false;
-bBackup=true;
 vIFS=$IFS;
-sIndexFile="tmp.Index.log"
+sIndexFile="./../tmp.Index.log"
+sFilesFile="./../tmp.Files.log"
 
 let iMaxArgs=$(getconf ARG_MAX)-100
 
 #Build Options
-while getopts hcd:qsif:o:b option
+while getopts hcd:qsi:o: option
 do
 	case "${option}"
 	in
@@ -57,9 +59,6 @@ do
 		q) bQuiet=true;;
 		s) let iMaxSize=${OPTARG} / 1024;;
 		i) bIgnored=false;;
-		f) vLoad=${OPTARG};;
-		o) vSave=${OPTARG};;
-		b) bBackup=false;;
 	esac
 done
 
@@ -69,13 +68,6 @@ if ! [ -d $sPath ]; then
 	echo " "
 	renderHelp
 	exit 1;
-fi
-
-if [ $bBackup != false ]; then
-	showMessage "Backing Up..." true
-		sDate=$(date +%Y%m%d-%H%i%s)
-		tar -zcf "$sPath/../repo-$sDate.tar.gz" $sPath > /dev/null 2>&1
-	showMessage "Backing Up...Done!"
 fi
 
 showMessage "Entering $sPath"
@@ -88,180 +80,73 @@ pushd "${sPath}" > /dev/null
 		exit 2;
 	fi
 	
-	if [ $vLoad != false ]; then
-		if ! [ -f $vLoad ]; then
-			echo "ERROR Import File Does Not Exist: $vLoad"
-			echo " "
-			renderHelp
-			exit 4;
-		fi
-	fi
-	
-	if [ $vLoad == false ]; then
-		showMessage "Building File Hash List..." true
-			git rev-list --objects --all | sort -k 2 > $sIndexFile
-		showMessage "Building File Hash List...Done!"
-	
-		if [ $bClean == true ]; then
-			showMessage "Cleaning Repo..." true
-			git gc > /dev/null 2>&1
-			showMessage "Cleaning Repo...Done!"
+	showMessage "Building File Hash List..." true
+		git rev-list --objects --all | sort -k 2 > $sIndexFile
+	showMessage "Building File Hash List...Done!"
+
+	if [ $bClean == true ]; then
+		showMessage "Cleaning Repo..." true
+		git gc > /dev/null 2>&1
+		showMessage "Cleaning Repo...Done!"
 		fi
 
 		showMessage "Building Sizes..." true
-			sObjects=$(git verify-pack -v .git/objects/pack/pack-*.idx | egrep "^\w+ blob\W+[0-9]+ [0-9]+ [0-9]+$" | sort -k 3 -n -r)
-		showMessage "Building Sizes...Done!"
+		sObjects=$(git verify-pack -v .git/objects/pack/pack-*.idx | egrep "^\w+ blob\W+[0-9]+ [0-9]+ [0-9]+$" | sort -k 3 -n -r)
+	showMessage "Building Sizes...Done!"
 	
-		iTotal=$(echo "$sObjects" | cut -f 1 -d\ | wc -l | awk '{gsub(/^ +| +$/,"")} {print $0}')
-		iCount=0
-		let iCols=$(tput cols)-22;
-		
-		sFiles=""
-		IFS=$'\n'
-		for sObject in $sObjects; do
-			SHA=$(echo "$sObject" | cut -f 1 -d\ )
-			
-			sIndex=$(grep $SHA $sIndexFile);
-			if [ -z "$sIndex" ]; then
-				continue
-			fi
-			
-			iSize=$(echo "$sObject" | awk '{print $3}');
-			sFile=$(echo "$sIndex" | awk '{print $2}');
-
-			if [ $iMaxSize == 0 -o $iSize -gt $iMaxSize ]; then
-				sFiles="$sFiles"$'\n'"$sFile"
-			fi
-		
-			let iCount+=1
-			
-			#iPercent=$(awk -v c=$iCount -v t=$iTotal 'BEGIN { print c / t }')
-			#iColumns=$(awk -v c=$iCols -v p=$iPercent 'BEGIN { print int(c * p) }')
-			#iPercent=$(awk -v p=$iPercent 'BEGIN { print int(p * 100) }')
-			#iBlankCols=$(awk -v c=$iCols -v f=$iColumns 'BEGIN { print c - f}' )
-		
-
-			#if [ $iColumns == "0" ]; then
-					#		sEqual=""
-			#else
-				#	sEqual=$(head -c $iColumns < /dev/zero | tr '\0' '=')
-			#fi
-			#if [ $iBlankCols == "0" ]; then
-				#	sBlank=""
-			#else
-				#	sBlank=$(head -c $iBlankCols < /dev/zero | tr '\0' ' ')
-			#	fi
-		
-			#showMessage "Processing...[$sEqual$sBlank] $iPercent %" true
-
-			let iRemaining=$iTotal-$iCount
-			showMessage "Processing...$iRemaining Items Remaining..." true
-		done;
-		IFS=$vIFS
-
-		let iCols=$iCols-18
-		sBlank=$(head -c $iCols < /dev/zero | tr '\0' ' ')
-		showMessage "\rProcessing...Done! $sBlank"
-		
-		rm $sIndexFile
-		
-		if [ $vSave != false ]; then
-			showMessage "Saving Files List..." true
-			echo "$sFiles" > $vSave
-			showMessage "\rSaving Files List...Done!"
-		fi
-	else
-		sFiles=$(cat $vLoad);
+	IFS=$'\n'
+	iTotal=0
+	for sObject in $sObjects; do
+		let iTotal+=1
+		showMessage "Counting Objects...$iTotal" true
+	done
+	showMessage "Counting Objects...Done!"
+	
+	iCount=0
+	let iCols=$(tput cols)-22;
+	
+	if [ -f $sFilesFile ]; then 
+		rm $sFilesFile;
 	fi
 	
-	if [ $bIgnored ]; then
-		git ls-files > $sIndexFile
+	for sObject in $sObjects; do
+		SHA=$(echo "$sObject" | cut -f 1 -d\ )
 		
-		#iTotal=$(cat $sFiles | wc -l | awk '{gsub(/^ +| +$/,"")} {print $0}')
-		#let iCols=$(tput cols)-29;
-			#Comparing To Index...[]     %#
-		
-		#Defaults
-		iCount=0
-		iTotal=0
-		sRemove=""
-		IFS=$'\n'
-		for sFile in $sFiles; do
-			let iTotal+=1
-		done;
-		for sFile in $sFiles; do
-			bIncluded=false
-			sFound=$(grep -m1 $sFile $sIndexFile)
-			if [ -n "$sFound" ]; then
-				sRemove="$sRemove"$'\n'"$sFile"
-			fi
-			
-			let iCount+=1
-			
-			
-			#iPercent=$(awk -v c=$iCount -v t=$iTotal 'BEGIN { print c / t }')
-			#iColumns=$(awk -v c=$iCols -v p=$iPercent 'BEGIN { print int(c * p) }')
-			#iPercent=$(awk -v p=$iPercent 'BEGIN { print int(p * 100) }')
-			#iBlankCols=$(awk -v c=$iCols -v f=$iColumns 'BEGIN { print c - f }' )
-		
-
-			#if [ $iColumns == "0" ]; then
-				#	sEqual=""
-			#else
-				#	sEqual=$(head -c $iColumns < /dev/zero | tr '\0' '=')
-			#fi
-			#if [ $iBlankCols == "0" ]; then
-				#	sBlank=""
-			#else
-				#	sBlank=$(head -c $iBlankCols < /dev/zero | tr '\0' ' ')
-			#fi
-		
-			#showMessage "Comparing To Index...[$sEqual$sBlank] $iPercent %" true
-			
-			let iRemaining=$iTotal-$iCount
-			showMessage "Comparing To Index...$iRemaining Remaining..." true
-		done;
-		IFS=$vIFS
-		let iCols=$iCols+9
-		sBlank=$(head -c $iCols < /dev/zero | tr '\0' ' ')
-		showMessage "Comparing To Index...Done!$sBlank"
-		
-		rm $sIndexFile
-		
-		if [ -n "$sRemove" ]; then
-			iTotal=$(echo "$sRemove" | wc -l | awk '{gsub(/^ +| +$/,"")} {print $0}')
-			let iCols=$(tput cols)-46;
-				#"Removing Ignored Files From History...[]     "
-			iCount=0
-			sRemoving=""
-			IFS=$'\n'
-			for sFile in $sRemove; do
-				let iCount+=1
-				
-				let iRemaining=$iTotal-$iCount
-			
-				showMessage "Removing Ignored Files From History...$iRemaining Remaining..." true
-				git filter-branch --force --index-filter "git rm --cached --ignore-unmatch $sRemoving" --prune-empty --tag-name-filter cat -- --all | {
-					while read sLine; do
-						if [ $sLine =~ "\(([A-Z]+)\/([A-Z]+)\)" ]; then
-								
-						fi
-					done
-				}
-				
-				rm -rf .git/refs/original/ #> /dev/null 2>&1
-				git reflog expire --expire=now --all #> /dev/null 2>&1
-			done;
-			
-			IFS=$vIFS
-			let iCols=$iCols+3
-			sBlank=$(head -c $iCols < /dev/zero | tr '\0' ' ')
-			showMessage "Removing Ignored Files From History...Done!$sBlank"
-			showMessage "Cleaning Up..." true
-				git gc --prune=now > /dev/null 2>&1
-				git gc --aggressive --prune=now > /dev/null 2>&1
-			showMessage "Cleaning Up...Done!"
+		sIndex=$(grep $SHA $sIndexFile);
+		if [ -z "$sIndex" ]; then
+			continue
 		fi
+		
+		iSize=$(echo "$sObject" | awk '{print $3}');
+		sFile=$(echo "$sIndex" | awk '{print $2}');
+
+		if [ $iMaxSize == 0 -o $iSize -gt $iMaxSize ]; then
+			echo $'\n'"$sFile" >> $sFilesFile
+		fi
+	
+		let iCount+=1
+		let iRemaining=$iTotal-$iCount
+		showMessage "Processing...$iRemaining Items Remaining..." true
+	done;
+
+	showMessage "Processing...Done! $sBlank"
+	
+	if [ $sIndexFile != "./../tmp.Index.log" ]; then
+		rm $sIndexFile
+	fi
+	
+	
+	if [ $bIgnored ]; then
+		DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+		pushd $DIR
+			./ignored-files.sh -d $sPath -f $sFilesFile -i
+		popd
+	else
+		cat $sFilesFile;
+	fi
+	
+	if [ $sFilesFile != "./../tmp.Files.log" ]; then
+		rm $sFilesFile
 	fi
 	
 	showMessage "Leaving $sPath"
